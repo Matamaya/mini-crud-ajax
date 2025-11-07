@@ -74,18 +74,22 @@ if ($metodoHttpRecibido === 'GET' && $accionSolicitada === 'list') {
 }
 
 
+// -----------------------------------------------------------------------------
 // 5) CREAR usuario: POST /api.php?action=create
 // Body JSON esperado: { "nombre": "...", "email": "..." }
+// -----------------------------------------------------------------------------
 if ($metodoHttpRecibido === 'POST' && $accionSolicitada === 'create') {
-    // 5.1) Leer el cuerpo bruto para soportar JSON
     $cuerpoBruto = (string) file_get_contents('php://input');
-    $datosDecodificados = $cuerpoBruto !== '' ? (json_decode($cuerpoBruto, true) ?? []) : [];
+    $datosDecodificados = $cuerpoBruto !== ''
+        ? (json_decode($cuerpoBruto, true) ?? [])
+        : [];
 
-    // 5.2) Extraer con prioridad: JSON → POST clásico → cadena vacía
+    // Extraemos datos y normalizamos
     $nombreUsuarioNuevo = trim((string) ($datosDecodificados['nombre'] ?? $_POST['nombre'] ?? ''));
     $correoUsuarioNuevo = trim((string) ($datosDecodificados['email'] ?? $_POST['email'] ?? ''));
+    $correoUsuarioNormalizado = mb_strtolower($correoUsuarioNuevo);
 
-    // 5.3) Validación mínima en servidor
+    // Validación mínima en servidor
     if ($nombreUsuarioNuevo === '' || $correoUsuarioNuevo === '') {
         responder_json_error('Los campos "nombre" y "email" son obligatorios.', 422);
     }
@@ -94,19 +98,31 @@ if ($metodoHttpRecibido === 'POST' && $accionSolicitada === 'create') {
         responder_json_error('El campo "email" no tiene un formato válido.', 422);
     }
 
-    // 5.4) Agregar al array en memoria
+    // Límites razonables para este ejercicio
+    if (mb_strlen($nombreUsuarioNuevo) > 60) {
+        responder_json_error('El campo "nombre" excede los 60 caracteres.', 422);
+    }
+
+    if (mb_strlen($correoUsuarioNuevo) > 120) {
+        responder_json_error('El campo "email" excede los 120 caracteres.', 422);
+    }
+
+    // Evitar duplicados por email
+    if (existeEmailDuplicado($listaUsuarios, $correoUsuarioNormalizado)) {
+        responder_json_error('Ya existe un usuario con ese email.', 409);
+    }
+
+    // Agregamos y persistimos (guardamos el email normalizado)
     $listaUsuarios[] = [
         'nombre' => $nombreUsuarioNuevo,
-        'email'  => $correoUsuarioNuevo,
+        'email'  => $correoUsuarioNormalizado,
     ];
 
-    // 5.5) Persistir en disco con formato legible
     file_put_contents(
         $rutaArchivoDatosJson,
         json_encode($listaUsuarios, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
     );
 
-    // 5.6) Devolver lista completa con 201 (creado)
     responder_json_exito($listaUsuarios, 201);
 }
 
@@ -152,3 +168,26 @@ if (($metodoHttpRecibido === 'POST' || $metodoHttpRecibido === 'DELETE') && $acc
 
 // 7) Si llegamos aquí, la acción solicitada no está soportada
 responder_json_error('Acción no soportada. Use list | create | delete', 400);
+
+
+
+/**
+ * Comprueba si ya existe un usuario con el email dado (comparación exacta).
+ *
+ * @param array  $usuarios         Lista actual en memoria.
+ * @param string $emailNormalizado Email normalizado en minúsculas.
+ */
+function existeEmailDuplicado(array $usuarios, string $emailNormalizado): bool {
+    foreach ($usuarios as $u) {
+        if (
+            isset($u['email']) &&
+            is_string($u['email']) &&
+            mb_strtolower($u['email']) === $emailNormalizado
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+?>

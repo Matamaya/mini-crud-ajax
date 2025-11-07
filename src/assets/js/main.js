@@ -1,34 +1,24 @@
-// Este archivo se irá construyendo paso a paso.
-// De momento confirmamos que el script carga correctamente.
-console.log('main.js cargado correctamente: listo para implementar fetch().');
-
-
 // -----------------------------------------------------------------------------
 // Mini CRUD AJAX — Lado cliente (sin librerías)
 // Archivo: /assets/js/main.js
-// Responsabilidades:
-// - Obtener la lista de usuarios del servidor y pintarla en la tabla.
-// - Enviar altas de usuario sin recargar la página.
-// - Eliminar usuarios por índice y refrescar el listado.
-// - Mostrar mensajes de estado (éxito/error) de manera temporal.
 // -----------------------------------------------------------------------------
 
 /** URL absoluta o relativa del endpoint PHP (API del servidor) */
 const URL_API_SERVIDOR = '/api.php';
 
 /** Elementos de la interfaz que necesitamos manipular */
-const nodoCuerpoTablaUsuarios   = document.getElementById('tbody');      // <tbody> del listado
-const formularioAltaUsuario     = document.getElementById('formCreate'); // <form> de alta
-const nodoZonaMensajesEstado    = document.getElementById('msg');        // Zona de mensajes
+const nodoCuerpoTablaUsuarios = document.getElementById('tbody');             // <tbody> del listado
+const nodoFilaEstadoVacio = document.getElementById('fila-estado-vacio');     // fila de “no hay datos”
+const formularioAltaUsuario = document.getElementById('formCreate');          // <form> de alta
+const nodoZonaMensajesEstado = document.getElementById('msg');                // <div> mensajes
+const nodoBotonAgregarUsuario = document.getElementById('boton-agregar-usuario');
+const nodoIndicadorCargando = document.getElementById('indicador-cargando');
 
 // -----------------------------------------------------------------------------
 // BLOQUE: Gestión de mensajes de estado (éxito / error)
-// Muestra un texto temporal en la página y lo limpia a los 2s.
-// 'tipoEstado' debe ser 'ok', 'error' o '' (vacío para limpiar).
 // -----------------------------------------------------------------------------
 function mostrarMensajeDeEstado(tipoEstado, textoMensaje) {
-    // Aplica clases CSS: .ok o .error
-    nodoZonaMensajesEstado.className = tipoEstado; 
+    nodoZonaMensajesEstado.className = tipoEstado; // .ok | .error | ''
     nodoZonaMensajesEstado.textContent = textoMensaje;
 
     if (tipoEstado !== '') {
@@ -39,11 +29,21 @@ function mostrarMensajeDeEstado(tipoEstado, textoMensaje) {
     }
 }
 
-// <div> mensajes
+// -----------------------------------------------------------------------------
+// BLOQUE: Indicador de carga + bloqueo de botón
+// -----------------------------------------------------------------------------
+function activarEstadoCargando() {
+    if (nodoBotonAgregarUsuario) nodoBotonAgregarUsuario.disabled = true;
+    if (nodoIndicadorCargando) nodoIndicadorCargando.hidden = false;
+}
+
+function desactivarEstadoCargando() {
+    if (nodoBotonAgregarUsuario) nodoBotonAgregarUsuario.disabled = false;
+    if (nodoIndicadorCargando) nodoIndicadorCargando.hidden = true;
+}
 
 // -----------------------------------------------------------------------------
-// BLOQUE: Sanitización de texto para evitar inyección en el DOM
-// Reemplaza caracteres especiales por entidades HTML seguras.
+// BLOQUE: Sanitización de texto
 // -----------------------------------------------------------------------------
 function convertirATextoSeguro(entradaPosiblementePeligrosa) {
     return String(entradaPosiblementePeligrosa)
@@ -56,13 +56,18 @@ function convertirATextoSeguro(entradaPosiblementePeligrosa) {
 
 // -----------------------------------------------------------------------------
 // BLOQUE: Renderizado del listado de usuarios
-// Recibe un array de objetos {nombre, email} y genera las filas de la tabla.
 // -----------------------------------------------------------------------------
 function renderizarTablaDeUsuarios(arrayUsuarios) {
-    // 4.1) Limpiamos el contenido previo del <tbody>
     nodoCuerpoTablaUsuarios.innerHTML = '';
 
-    // 4.2) Por cada usuario, creamos una fila <tr> y la insertamos
+    // Mostrar u ocultar la fila de estado vacío según haya datos o no
+    if (Array.isArray(arrayUsuarios) && arrayUsuarios.length > 0) {
+        if (nodoFilaEstadoVacio) nodoFilaEstadoVacio.hidden = true;
+    } else {
+        if (nodoFilaEstadoVacio) nodoFilaEstadoVacio.hidden = false;
+        return; // no hay filas que pintar
+    }
+
     arrayUsuarios.forEach((usuario, posicionEnLista) => {
         const nodoFila = document.createElement('tr');
         nodoFila.innerHTML = `
@@ -73,7 +78,8 @@ function renderizarTablaDeUsuarios(arrayUsuarios) {
                 <button
                     type="button"
                     data-posicion="${posicionEnLista}"
-                    aria-label="Eliminar usuario ${posicionEnLista + 1}">
+                    aria-label="Eliminar usuario ${posicionEnLista + 1}"
+                    class="btn-eliminar">
                     Eliminar
                 </button>
             </td>
@@ -82,13 +88,18 @@ function renderizarTablaDeUsuarios(arrayUsuarios) {
     });
 }
 
+// -----------------------------------------------------------------------------
+// BLOQUE: Carga inicial y refresco del listado (GET list)
+// -----------------------------------------------------------------------------
 async function obtenerYMostrarListadoDeUsuarios() {
     try {
         const respuestaHttp = await fetch(`${URL_API_SERVIDOR}?action=list`);
         const cuerpoJson = await respuestaHttp.json();
+
         if (!cuerpoJson.ok) {
             throw new Error(cuerpoJson.error || 'No fue posible obtener el listado.');
         }
+
         renderizarTablaDeUsuarios(cuerpoJson.data);
     } catch (error) {
         mostrarMensajeDeEstado('error', error.message);
@@ -99,24 +110,23 @@ async function obtenerYMostrarListadoDeUsuarios() {
 // BLOQUE: Alta de usuario (POST create) sin recargar la página
 // -----------------------------------------------------------------------------
 formularioAltaUsuario?.addEventListener('submit', async (evento) => {
-    // 6.1) Cancelar comportamiento por defecto (evita recargar)
     evento.preventDefault();
 
-    // 6.2) Tomar datos del formulario
     const datosFormulario = new FormData(formularioAltaUsuario);
     const datosUsuarioNuevo = {
         nombre: String(datosFormulario.get('nombre') || '').trim(),
         email: String(datosFormulario.get('email') || '').trim(),
     };
 
-    // 6.3) Validación mínima en cliente (si falla, no llamamos a la API)
+    // Validación mínima en cliente
     if (!datosUsuarioNuevo.nombre || !datosUsuarioNuevo.email) {
         mostrarMensajeDeEstado('error', 'Los campos Nombre y Email son obligatorios.');
         return;
     }
 
     try {
-        // 6.4) Enviar al servidor como JSON
+        activarEstadoCargando();
+
         const respuestaHttp = await fetch(`${URL_API_SERVIDOR}?action=create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -129,34 +139,31 @@ formularioAltaUsuario?.addEventListener('submit', async (evento) => {
             throw new Error(cuerpoJson.error || 'No fue posible crear el usuario.');
         }
 
-        // 6.5) Pintar el nuevo listado devuelto por el servidor y limpiar el form
         renderizarTablaDeUsuarios(cuerpoJson.data);
         formularioAltaUsuario.reset();
         mostrarMensajeDeEstado('ok', 'Usuario agregado correctamente.');
     } catch (error) {
         mostrarMensajeDeEstado('error', error.message);
+    } finally {
+        desactivarEstadoCargando();
     }
 });
 
 // -----------------------------------------------------------------------------
-// BLOQUE: Eliminación de usuario (POST delete) mediante delegación de eventos
+// BLOQUE: Eliminación de usuario (POST delete) mediante delegación
 // -----------------------------------------------------------------------------
 nodoCuerpoTablaUsuarios?.addEventListener('click', async (evento) => {
-    // 7.1) ¿Se ha hecho clic en un botón con data-posicion?
     const nodoBotonEliminar = evento.target.closest('button[data-posicion]');
     if (!nodoBotonEliminar) return;
 
-    // 7.2) Convertir el índice a número entero y validar
     const posicionUsuarioAEliminar = parseInt(nodoBotonEliminar.dataset.posicion, 10);
     if (!Number.isInteger(posicionUsuarioAEliminar)) return;
 
-    // 7.3) Confirmación de seguridad
     if (!window.confirm('¿Deseas eliminar este usuario?')) return;
 
     try {
-        // 7.4) Enviar petición de borrado al servidor
         const respuestaHttp = await fetch(`${URL_API_SERVIDOR}?action=delete`, {
-            method: 'POST', // simplificado; podríamos usar DELETE
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ index: posicionUsuarioAEliminar }),
         });
@@ -167,7 +174,6 @@ nodoCuerpoTablaUsuarios?.addEventListener('click', async (evento) => {
             throw new Error(cuerpoJson.error || 'No fue posible eliminar el usuario.');
         }
 
-        // 7.5) Volver a pintar la lista resultante
         renderizarTablaDeUsuarios(cuerpoJson.data);
         mostrarMensajeDeEstado('ok', 'Usuario eliminado correctamente.');
     } catch (error) {
@@ -175,7 +181,7 @@ nodoCuerpoTablaUsuarios?.addEventListener('click', async (evento) => {
     }
 });
 
-
+// -----------------------------------------------------------------------------
 // BLOQUE: Inicialización de la pantalla
 // -----------------------------------------------------------------------------
 obtenerYMostrarListadoDeUsuarios();
