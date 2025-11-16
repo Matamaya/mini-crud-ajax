@@ -1,0 +1,25 @@
+[
+    {
+        "nombre": "prueba1",
+        "apellido": "albion",
+        "grupo": "daw1",
+        "email": "prueba@gmail.com",
+        "telefono": "",
+        "fecha_nacimiento": "2025-11-06",
+        "hora": "",
+        "color_favorito": "",
+        "experiencia": "1",
+        "nivel_estudio": "secundaria",
+        "idiomas": [],
+        "lenguaje_fav": "",
+        "habilidades": "",
+        "estresLvl": "50",
+        "proyecto_favorito": "",
+        "fav_partner": "Kyle",
+        "sec_partner": "",
+        "foe_partner": "Emilio",
+        "motivo": "",
+        "rol_fav": "",
+        "fecha": "2025-11-16 23:15:15"
+    }
+]

@@ -1,15 +1,13 @@
 <?php
+
 declare(strict_types=1);
+
+// Incluimos las funciones de auth.php porque también usa getUsers/saveUsers
+require_once __DIR__ . '/auth.php';
 
 /**
  * API del Mini-CRUD
- * Acciones admitidas: list | create | delete
- * Persistencia: archivo JSON (data.json) en el mismo directorio.
- *
- * Nota didáctica:
- * - Este archivo se invoca desde el navegador mediante fetch() (AJAX).
- * - Siempre respondemos en JSON.
- * - Las validaciones mínimas se realizan en servidor, aunque el cliente valide.
+ * Acciones admitidas: list | create | delete | edit
  */
 
 // 1) Todas las respuestas serán JSON UTF-8
@@ -61,12 +59,11 @@ if (!is_array($listaUsuarios)) {
 }
 
 
-// 3) Método HTTP y acción (por querystring o formulario)
+// 3) Método HTTP y acción
 // - Por simplicidad: list en GET; create y delete por POST.
 // - Si no llega 'action', usamos 'list' como valor por defecto.
 $metodoHttpRecibido = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $accionSolicitada = $_GET['action'] ?? $_POST['action'] ?? 'list';
-
 
 // 4) LISTAR usuarios: GET /api.php?action=list
 if ($metodoHttpRecibido === 'GET' && $accionSolicitada === 'list') {
@@ -76,7 +73,6 @@ if ($metodoHttpRecibido === 'GET' && $accionSolicitada === 'list') {
 
 // -----------------------------------------------------------------------------
 // 5) CREAR usuario: POST /api.php?action=create
-// Body JSON esperado: { "nombre": "...", "email": "..." }
 // -----------------------------------------------------------------------------
 if ($metodoHttpRecibido === 'POST' && $accionSolicitada === 'create') {
     $cuerpoBruto = (string) file_get_contents('php://input');
@@ -87,6 +83,8 @@ if ($metodoHttpRecibido === 'POST' && $accionSolicitada === 'create') {
     // Extraemos datos y normalizamos
     $nombreUsuarioNuevo = trim((string) ($datosDecodificados['nombre'] ?? $_POST['nombre'] ?? ''));
     $correoUsuarioNuevo = trim((string) ($datosDecodificados['email'] ?? $_POST['email'] ?? ''));
+    $passwordPlano = trim((string) ($datosDecodificados['password'] ?? $_POST['password'] ?? ''));
+    $rol = trim((string) ($datosDecodificados['rol'] ?? $_POST['rol'] ?? 'user'));
     $correoUsuarioNormalizado = mb_strtolower($correoUsuarioNuevo);
 
     // Validación mínima en servidor
@@ -112,10 +110,23 @@ if ($metodoHttpRecibido === 'POST' && $accionSolicitada === 'create') {
         responder_json_error('Ya existe un usuario con ese email.', 409);
     }
 
+    // Generar ID autoincremental (seguro aunque algunos usuarios no tuvieran 'id')
+    $nuevoId = 1;
+    $idsExistentes = array_column($listaUsuarios, 'id');
+    if (!empty($idsExistentes)) {
+        $nuevoId = max($idsExistentes) + 1;
+    }
+
+    // Cifrar la contraseña con password_hash()
+    $passwordHash = password_hash($passwordPlano, PASSWORD_DEFAULT);
+
     // Agregamos y persistimos (guardamos el email normalizado)
     $listaUsuarios[] = [
-        'nombre' => $nombreUsuarioNuevo,
-        'email'  => $correoUsuarioNormalizado,
+        'id'       => $nuevoId,
+        'nombre'   => $nombreUsuarioNuevo,
+        'email'    => $correoUsuarioNormalizado,
+        'password' => $passwordHash,
+        'rol'      => $rol
     ];
 
     file_put_contents(
@@ -166,10 +177,62 @@ if (($metodoHttpRecibido === 'POST' || $metodoHttpRecibido === 'DELETE') && $acc
     responder_json_exito($listaUsuarios); // 200 OK
 }
 
+// -----------------------------------------------------------------------------
+// 7) EDITAR usuario (UPDATE)
+// -----------------------------------------------------------------------------
+
+if (($metodoHttpRecibido === 'POST') && $accionSolicitada === 'update') {
+    $cuerpoBruto = (string) file_get_contents('php://input');
+    $datosDecodificados = $cuerpoBruto !== ''
+        ? (json_decode($cuerpoBruto, true) ?? [])
+        : [];
+
+    // CORREGIR: Buscar por 'id' en lugar de 'index'
+    $idUsuario = (int) ($datosDecodificados['id'] ?? $_POST['id'] ?? -1);
+    $nombreNuevo = trim((string) ($datosDecodificados['nombre'] ?? $_POST['nombre'] ?? ''));
+    $emailNuevo = trim((string) ($datosDecodificados['email'] ?? $_POST['email'] ?? ''));
+    $passwordNuevo = trim((string) ($datosDecodificados['password'] ?? $_POST['password'] ?? ''));
+    $rolNuevo = trim((string) ($datosDecodificados['rol'] ?? $_POST['rol'] ?? 'user'));
+    $emailNormalizado = mb_strtolower($emailNuevo);
+
+    // Resto del código permanece igual...
+    if ($nombreNuevo === '' || $emailNuevo === '') {
+        responder_json_error('Los campos "nombre" y "email" son obligatorios.', 422);
+    }
+
+    if (!filter_var($emailNuevo, FILTER_VALIDATE_EMAIL)) {
+        responder_json_error('El campo "email" no tiene un formato válido.', 422);
+    }
+
+    $encontrado = false;
+    foreach ($listaUsuarios as &$u) {
+        if (isset($u['id']) && (int)$u['id'] === $idUsuario) {
+            $encontrado = true;
+            $u['nombre'] = $nombreNuevo;
+            $u['email'] = $emailNormalizado;
+            $u['rol'] = $rolNuevo;
+
+            if ($passwordNuevo !== '') {
+                $u['password'] = password_hash($passwordNuevo, PASSWORD_DEFAULT);
+            }
+            break;
+        }
+    }
+
+    if (!$encontrado) {
+        responder_json_error('Usuario no encontrado.', 404);
+    }
+
+    file_put_contents(
+        $rutaArchivoDatosJson,
+        json_encode($listaUsuarios, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
+    );
+
+    responder_json_exito($listaUsuarios);
+}
+
 // 7) Si llegamos aquí, la acción solicitada no está soportada
-responder_json_error('Acción no soportada. Use list | create | delete', 400);
-
-
+responder_json_error('Acción no soportada. Use list | create | delete | update.', 400);
 
 /**
  * Comprueba si ya existe un usuario con el email dado (comparación exacta).
@@ -177,7 +240,8 @@ responder_json_error('Acción no soportada. Use list | create | delete', 400);
  * @param array  $usuarios         Lista actual en memoria.
  * @param string $emailNormalizado Email normalizado en minúsculas.
  */
-function existeEmailDuplicado(array $usuarios, string $emailNormalizado): bool {
+function existeEmailDuplicado(array $usuarios, string $emailNormalizado): bool
+{
     foreach ($usuarios as $u) {
         if (
             isset($u['email']) &&
@@ -189,5 +253,3 @@ function existeEmailDuplicado(array $usuarios, string $emailNormalizado): bool {
     }
     return false;
 }
-
-?>
